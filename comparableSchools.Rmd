@@ -1,0 +1,503 @@
+---
+title: "Comparable Schools"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    runtime: shiny
+---
+
+```{r setup, include=FALSE,eval = TRUE}
+library(flexdashboard)
+library(dplyr)
+library(ggplot2)
+library(shiny)
+library(plotly)
+library(DT)
+
+data <- read.csv("SchoolGrades18.csv",stringsAsFactors = FALSE)
+#data <- read.csv("K:\\A&A Docs\\Aaron Smith\\ComparableSchools\\SchoolGrades18.csv",stringsAsFactors = FALSE)
+#data <- as.data.frame(readxl::read_excel("K:\\A&A Docs\\Aaron Smith\\ComparableSchools\\SchoolGrades18.xls",skip = 3))
+data <- data[order(data[,"School.Name"]),]
+data <- data[order(data[,"District.Name"]),]
+data[,"School"] <- paste0(data[,"District.Name"],"; ",data[,"School.Name"])
+data <- dplyr::bind_rows(data[data[,"District.Name"] == "SEMINOLE",],data[data[,"District.Name"] != "SEMINOLE",])
+rownames(data) <- data[,"School"]
+for(j in 1:ncol(data)){
+  if(class(data[,j]) == "integer"){
+    data[,j] <- as.numeric(data[,j])
+  }
+}
+
+elementary <- data[data[,"School.Type"] == 1 & data[,"Charter.School"] == "NO",]
+middle <- data[data[,"School.Type"] == 2 & data[,"Charter.School"] == "NO",]
+high <- data[data[,"School.Type"] == 3 & data[,"Charter.School"] == "NO",]
+other <- data[data[,"School.Type"] == 4 | data[,"Charter.School"] == "YES",]
+
+D.elementary <- as.matrix(dist(elementary[,c("Percent.of.Minority.Students","Percent.of.Economically.Disadvantaged.Students")],method = "maximum"))
+D.elementary <- D.elementary[,!grepl(x = colnames(D.elementary),pattern = "SEMINOLE;")]
+M.elementary <- D.elementary
+for(j in 1:nrow(M.elementary)) M.elementary[j,] <- colnames(D.elementary)[order(D.elementary[j,])]
+colnames(M.elementary) <- 1:ncol(M.elementary)
+elementary <- data.frame(elementary,M.elementary)
+
+D.middle <- as.matrix(dist(middle[,c("Percent.of.Minority.Students","Percent.of.Economically.Disadvantaged.Students")],method = "maximum"))
+D.middle <- D.middle[,!grepl(x = colnames(D.middle),pattern = "SEMINOLE;")]
+M.middle <- D.middle
+for(j in 1:nrow(M.middle)) M.middle[j,] <- colnames(D.middle)[order(D.middle[j,])]
+colnames(M.middle) <- 1:ncol(M.middle)
+middle <- data.frame(middle,M.middle)
+
+D.high <- as.matrix(dist(high[,c("Percent.of.Minority.Students","Percent.of.Economically.Disadvantaged.Students")],method = "maximum"))
+D.high <- D.high[,!grepl(x = colnames(D.high),pattern = "SEMINOLE;")]
+M.high <- D.high
+for(j in 1:nrow(M.high)) M.high[j,] <- colnames(D.high)[order(D.high[j,])]
+colnames(M.high) <- 1:ncol(M.high)
+high <- data.frame(high,M.high)
+
+D.other <- as.matrix(dist(other[,c("Percent.of.Minority.Students","Percent.of.Economically.Disadvantaged.Students")],method = "maximum"))
+D.other <- D.other[,!grepl(x = colnames(D.other),pattern = "SEMINOLE;")]
+M.other <- D.other
+for(j in 1:nrow(M.other)) M.other[j,] <- colnames(D.other)[order(D.other[j,])]
+colnames(M.other) <- 1:ncol(M.other)
+other <- data.frame(other,M.other)
+
+#seminole <- dplyr::bind_rows(
+#  elementary[grepl(x = rownames(elementary),pattern = "SEMINOLE;"),],
+#  middle[grepl(x = rownames(middle),pattern = "SEMINOLE;"),],
+#  high[grepl(x = rownames(high),pattern = "SEMINOLE;"),],
+#  other[grepl(x = rownames(other),pattern = "SEMINOLE;"),]
+#)
+
+#nonseminole <- dplyr::bind_rows(
+#  elementary[!grepl(x = rownames(elementary),pattern = "SEMINOLE;"),],
+#  middle[!grepl(x = rownames(middle),pattern = "SEMINOLE;"),],
+#  high[!grepl(x = rownames(high),pattern = "SEMINOLE;"),],
+#  other[!grepl(x = rownames(other),pattern = "SEMINOLE;"),]
+#)
+
+elementary <- elementary[,sapply(X = elementary,FUN = function(x) mean(is.na(x))) < 0.5]
+middle <- middle[,sapply(X = middle,FUN = function(x) mean(is.na(x))) < 0.5]
+high <- high[,sapply(X = high,FUN = function(x) mean(is.na(x))) < 0.5]
+other <-  other[,sapply(X = other,FUN = function(x) mean(is.na(x))) < 0.5]
+```
+
+Elementary
+=======================================================================
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Selections:
+
+Data source: 
+[http://www.fldoe.org/accountability/accountability-reporting/school-grades/](http://www.fldoe.org/accountability/accountability-reporting/school-grades/)
+
+```{r}
+selectInput(
+  "seminole_school",
+  label = "Seminole School",
+  choices = rownames(elementary)[toupper(elementary$District.Name) == "SEMINOLE"]
+)
+
+selectInput(
+  "number_of_schools",
+  label = "Select the number of schools",
+  choices = c(5,10,25,50,100,200,300,nrow(elementary) - sum(elementary$District.Name == "SEMINOLE") - 1)
+)
+
+
+
+elementary.variables <- c(
+    "English Language Arts Achievement","English Language Arts Learning Gains","English Language Arts Learning Gains of the Lowest 25 ",
+    "Mathematics Achievement","Mathematics Learning Gains","Mathematics Learning Gains of the Lowest 25 ",
+    "Science Achievement","Social Studies Achievement",
+    "Middle School Acceleration","Graduation Rate 2016 17","College and Career Acceleration 2016 17",
+    "Total Points Earned","Total Components","Percent of Total Possible Points","Percent Tested"
+  )
+elementary.variables <- elementary.variables[make.names(elementary.variables) %in% colnames(elementary)]
+
+selectInput(
+  "variable",
+  label = "Variable to plot",
+  choices = elementary.variables
+)
+variable <- reactive({make.names(input$variable)})
+
+closest.elementary <- reactive({
+  elementary[
+    c(input$seminole_school,
+    t(elementary[input$seminole_school,paste0("X",1:input$number_of_schools)])),
+  ]
+#  c("District.Name","School.Name","Percent.of.Minority.Students","Percent.of.Economically.Disadvantaged.Students",variable())
+})
+
+
+```
+
+### Scatterplot of comparable schools
+
+```{r}
+renderPlotly({
+  p <- ggplot(elementary) + 
+    aes(x = Percent.of.Minority.Students,y =   Percent.of.Economically.Disadvantaged.Students) + 
+    geom_point(colour = "#80808080") + 
+    #ggtitle("Scatterplot of Florida Elementary Schools",subtitle = "% Minority and % Economically Disadvantaged") +
+    xlab("% Minority") + 
+    ylab("% Economically Disadvantaged") + 
+    labs(caption = "Data Source: http://www.fldoe.org/accountability/accountability-reporting/school-grades/, 2018-07-20") + 
+  geom_point(data = closest.elementary(),colour = "blue",size = 2,,mapping = aes(District = District.Name,School = School.Name))  + 
+  geom_point(data = elementary[input$seminole_school,],colour = "red",size = 3)
+  ggplotly(p,tooltip = c("District","School"))
+})
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Data table of comparable schools
+
+```{r}
+renderDataTable({
+  datatable(
+    closest.elementary()[,!grepl(x = colnames(closest.elementary()),pattern = "X")], rownames = FALSE, 
+    extensions = 'Buttons', options = list(
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv', 'excel', 'pdf', 'print')
+    ), fillContainer =TRUE
+  )
+})
+#renderPrint({
+#  print(closest.elementary()[,variable()])
+#})
+```
+
+### Dot plot of data from comparable schools
+
+```{r,eval = TRUE,echo = FALSE}
+renderPlot({
+#  boxplot(closest.elementary()[,variable()],horizontal = TRUE,col = "steelblue",main = paste0("Boxplot of ",variable()," data from comparable schools"))
+  stripchart(closest.elementary()[,variable()],method = "stack",col = "blue",offset = 0.7,main = paste0("Dot plot of ",variable()," data from comparable schools"),pch = 19,ylim = c(1,1.5*max(table(closest.elementary()[,variable()]))))
+  abline(v = closest.elementary()[1,variable()],col = "red")
+  legend("topleft",lty = 1,col = "red",legend = gsub(x = input$seminole_school,pattern = "SEMINOLE; ",replacement = ""))
+    axis(1,closest.elementary()[,variable()])
+  })
+```
+```{r,eval = FALSE,echo = FALSE}
+renderPlotly({
+  dotplot.elementary <- ggplot(closest.elementary()) +
+    geom_dotplot(aes(x = variable()))
+  ggplotly(dotplot.elementary)
+  
+})
+```
+
+Middle
+=======================================================================
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Selections:
+
+Data source: 
+[http://www.fldoe.org/accountability/accountability-reporting/school-grades/](http://www.fldoe.org/accountability/accountability-reporting/school-grades/)
+
+```{r}
+selectInput(
+  "middle.seminole_school",
+  label = "Seminole School",
+  choices = rownames(middle)[toupper(middle$District.Name) == "SEMINOLE"]
+)
+
+selectInput(
+  "middle.number_of_schools",
+  label = "Select the number of schools",
+  choices = c(5,10,25,50,100,200,300,nrow(middle) - sum(middle$District.Name == "SEMINOLE") - 1)
+)
+
+closest.middle <- reactive({
+  middle[
+    c(input$middle.seminole_school,
+    t(middle[input$middle.seminole_school,paste0("X",1:input$middle.number_of_schools)])),
+  ]
+})
+
+middle.middle.variables <- c(
+    "English Language Arts Achievement","English Language Arts Learning Gains","English Language Arts Learning Gains of the Lowest 25 ",
+    "Mathematics Achievement","Mathematics Learning Gains","Mathematics Learning Gains of the Lowest 25 ",
+    "Science Achievement","Social Studies Achievement",
+    "Middle School Acceleration","Graduation Rate 2016 17","College and Career Acceleration 2016 17",
+    "Total Points Earned","Total Components","Percent of Total Possible Points","Percent Tested"
+  )
+middle.middle.variables <- middle.middle.variables[make.names(middle.middle.variables) %in% colnames(middle)]
+
+selectInput(
+  "middle.variable",
+  label = "Variable to plot",
+  choices = middle.middle.variables
+)
+middle.variable <- reactive({make.names(input$middle.variable)})
+```
+
+### Scatterplot of comparable schools
+
+```{r}
+renderPlotly({
+  p <- ggplot(middle) + 
+    aes(x = Percent.of.Minority.Students,y =   Percent.of.Economically.Disadvantaged.Students) + 
+    geom_point(colour = "#80808080") + 
+    #ggtitle("Scatterplot of Florida Middle Schools",subtitle = "% Minority and % Economically Disadvantaged") +
+    xlab("% Minority") + 
+    ylab("% Economically Disadvantaged") + 
+    labs(caption = "Data Source: http://www.fldoe.org/accountability/accountability-reporting/school-grades/, 2018-07-20") + 
+  geom_point(data = closest.middle(),colour = "blue",size = 2,,mapping = aes(District = District.Name,School = School.Name))  + 
+  geom_point(data = middle[input$middle.seminole_school,],colour = "red",size = 3)
+  ggplotly(p,tooltip = c("District","School"))
+})
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Data table of comparable schools
+
+```{r}
+renderDataTable({
+  datatable(
+    closest.middle()[,!grepl(x = colnames(closest.middle()),pattern = "X")], rownames = FALSE, 
+    extensions = 'Buttons', options = list(
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv', 'excel', 'pdf', 'print')
+    ), fillContainer =TRUE
+  )
+})
+#renderPrint({
+#  print(closest.middle()[,middle.variable()])
+#})
+```
+
+### Dot plot of data from comparable schools
+
+```{r}
+renderPlot({
+#  boxplot(closest.middle()[,middle.variable()],horizontal = TRUE,col = "steelblue",main = paste0("Boxplot of ",middle.variable()," data from comparable schools"))
+  stripchart(closest.middle()[,middle.variable()],method = "stack",col = "blue",offset = 0.7,main = paste0("Dot plot of ",middle.variable()," data from comparable schools"),pch = 19,ylim = c(1,1.5*max(table(closest.middle()[,middle.variable()]))))
+  abline(v = closest.middle()[1,middle.variable()],col = "red")
+  legend("topleft",lty = 1,col = "red",legend = gsub(x = input$middle.seminole_school,pattern = "SEMINOLE; ",replacement = ""))
+    axis(1,closest.middle()[,middle.variable()])
+  })
+```
+
+
+
+High
+=======================================================================
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Selections:
+
+Data source: 
+[http://www.fldoe.org/accountability/accountability-reporting/school-grades/](http://www.fldoe.org/accountability/accountability-reporting/school-grades/)
+
+```{r}
+selectInput(
+  "high.seminole_school",
+  label = "Seminole School",
+  choices = rownames(high)[toupper(high$District.Name) == "SEMINOLE"]
+)
+
+selectInput(
+  "high.number_of_schools",
+  label = "Select the number of schools",
+  choices = c(5,10,25,50,100,200,300,nrow(high) - sum(high$District.Name == "SEMINOLE") - 1)
+)
+
+closest.high <- reactive({
+  high[
+    c(input$high.seminole_school,
+    t(high[input$high.seminole_school,paste0("X",1:input$high.number_of_schools)])),
+  ]
+})
+
+high.variables <- c(
+    "English Language Arts Achievement","English Language Arts Learning Gains","English Language Arts Learning Gains of the Lowest 25 ",
+    "Mathematics Achievement","Mathematics Learning Gains","Mathematics Learning Gains of the Lowest 25 ",
+    "Science Achievement","Social Studies Achievement",
+    "high School Acceleration","Graduation Rate 2016 17","College and Career Acceleration 2016 17",
+    "Total Points Earned","Total Components","Percent of Total Possible Points","Percent Tested"
+  )
+high.variables <- high.variables[make.names(high.variables) %in% colnames(high)]
+
+selectInput(
+  "high.variable",
+  label = "Variable to plot",
+  choices = high.variables
+)
+high.variable <- reactive({make.names(input$high.variable)})
+```
+
+### Scatterplot of comparable schools
+
+```{r}
+renderPlotly({
+  p <- ggplot(high) + 
+    aes(x = Percent.of.Minority.Students,y =   Percent.of.Economically.Disadvantaged.Students) + 
+    geom_point(colour = "#80808080") + 
+    #ggtitle("Scatterplot of Florida High Schools",subtitle = "% Minority and % Economically Disadvantaged") +
+    xlab("% Minority") + 
+    ylab("% Economically Disadvantaged") + 
+    labs(caption = "Data Source: http://www.fldoe.org/accountability/accountability-reporting/school-grades/, 2018-07-20") + 
+  geom_point(data = closest.high(),colour = "blue",size = 2,mapping = aes(District = District.Name,School = School.Name))  + 
+  geom_point(data = high[input$high.seminole_school,],colour = "red",size = 3)
+  ggplotly(p,tooltip = c("District","School"))
+})
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Data table of comparable schools
+
+```{r}
+renderDataTable({
+  datatable(
+    closest.high()[,!grepl(x = colnames(closest.high()),pattern = "X")], rownames = FALSE, 
+    extensions = 'Buttons', options = list(
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv', 'excel', 'pdf', 'print')
+    ), fillContainer =TRUE
+  )
+})
+#renderPrint({
+#  print(closest.high()[,high.variable()])
+#})
+```
+
+### Dot plot of data from comparable schools
+
+```{r}
+renderPlot({
+#  boxplot(closest.high()[,high.variable()],horizontal = TRUE,col = "steelblue",main = paste0("Boxplot of ",high.variable()," data from comparable schools"))
+  stripchart(closest.high()[,high.variable()],method = "stack",col = "blue",offset = 0.7,main = paste0("Dot plot of ",high.variable()," data from comparable schools"),pch = 19,ylim = c(1,1.5*max(table(closest.high()[,high.variable()]))))
+  abline(v = closest.high()[1,high.variable()],col = "red")
+  legend("topleft",lty = 1,col = "red",legend = gsub(x = input$high.seminole_school,pattern = "SEMINOLE; ",replacement = ""))
+  axis(1,closest.high()[,high.variable()])
+  })
+```
+
+
+
+Other
+=======================================================================
+
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Selections:
+
+Data source: 
+[http://www.fldoe.org/accountability/accountability-reporting/school-grades/](http://www.fldoe.org/accountability/accountability-reporting/school-grades/)
+
+```{r}
+selectInput(
+  "other.seminole_school",
+  label = "Seminole School",
+  choices = rownames(other)[toupper(other$District.Name) == "SEMINOLE"]
+)
+
+selectInput(
+  "other.number_of_schools",
+  label = "Select the number of schools",
+  choices = c(5,10,25,50,100,200,300,nrow(other) - sum(other$District.Name == "SEMINOLE") - 1)
+)
+
+closest.other <- reactive({
+  other[
+    c(input$other.seminole_school,
+    t(other[input$other.seminole_school,paste0("X",1:input$other.number_of_schools)])),
+  ]
+})
+
+other.variables <- c(
+    "English Language Arts Achievement","English Language Arts Learning Gains","English Language Arts Learning Gains of the Lowest 25 ",
+    "Mathematics Achievement","Mathematics Learning Gains","Mathematics Learning Gains of the Lowest 25 ",
+    "Science Achievement","Social Studies Achievement",
+    "other School Acceleration","Graduation Rate 2016 17","College and Career Acceleration 2016 17",
+    "Total Points Earned","Total Components","Percent of Total Possible Points","Percent Tested"
+  )
+other.variables <- other.variables[make.names(other.variables) %in% colnames(other)]
+
+selectInput(
+  "other.variable",
+  label = "Variable to plot",
+  choices = other.variables
+)
+other.variable <- reactive({make.names(input$other.variable)})
+```
+
+### Scatterplot of comparable schools
+
+```{r,eval = FALSE,echo = FALSE}
+renderPlot({
+  ggplot(other) + 
+    aes(x = Percent.of.Minority.Students,y =   Percent.of.Economically.Disadvantaged.Students) + 
+    geom_point(colour = "#80808080") + 
+    ggtitle("Scatterplot of Florida Other Schools",subtitle = "% Minority and % Economically Disadvantaged") +
+    xlab("% Minority") + 
+    ylab("% Economically Disadvantaged") + 
+    labs(caption = "Data Source: http://www.fldoe.org/accountability/accountability-reporting/school-grades/, 2018-07-20") + 
+  geom_point(data = closest.other(),colour = "blue",size = 2)  + 
+  geom_point(data = other[input$other.seminole_school,],colour = "red",size = 3)
+})
+```
+
+```{r}
+renderPlotly({
+  p <- ggplot(other) + 
+    aes(x = Percent.of.Minority.Students,y =   Percent.of.Economically.Disadvantaged.Students) + 
+    geom_point(colour = "#80808080") + 
+    #ggtitle("Scatterplot of Florida Other Schools",subtitle = "% Minority and % Economically Disadvantaged") +
+    xlab("% Minority") + 
+    ylab("% Economically Disadvantaged") + 
+    labs(caption = "Data Source: http://www.fldoe.org/accountability/accountability-reporting/school-grades/, 2018-07-20") + 
+  geom_point(data = closest.other(),colour = "blue",size = 2,,mapping = aes(District = District.Name,School = School.Name))  + 
+  geom_point(data = other[input$other.seminole_school,],colour = "red",size = 3)
+  ggplotly(p,tooltip = c("District","School"))
+})
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Data table of comparable schools
+
+```{r}
+renderDataTable({
+  datatable(
+    closest.other()[,!grepl(x = colnames(closest.other()),pattern = "X")], rownames = FALSE, 
+    extensions = 'Buttons', options = list(
+      dom = 'Bfrtip',
+      buttons = c('copy', 'csv', 'excel', 'pdf', 'print')
+    ), fillContainer =TRUE
+  )
+})
+#renderPrint({
+#  print(closest.other()[,other.variable()])
+#})
+```
+
+### Dot plot of data from comparable schools
+
+```{r}
+renderPlot({
+#  boxplot(closest.other()[,other.variable()],horizontal = TRUE,col = "steelblue",main = paste0("Boxplot of ",other.variable()," data from comparable schools"))
+  stripchart(closest.other()[,other.variable()],method = "stack",col = "blue",offset = 0.7,main = paste0("Dot plot of ",other.variable()," data from comparable schools"),pch = 19,ylim = c(1,1.5*max(table(closest.other()[,other.variable()]))))
+  abline(v = closest.other()[1,other.variable()],col = "red")
+  legend("topleft",lty = 1,col = "red",legend = gsub(x = input$other.seminole_school,pattern = "SEMINOLE; ",replacement = ""))
+  axis(1,closest.other()[,other.variable()])
+  })
+```

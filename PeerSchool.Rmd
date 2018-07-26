@@ -1,0 +1,112 @@
+---
+title: "Peer School"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    runtime: shiny
+---
+
+Data source: 
+[http://www.fldoe.org/accountability/accountability-reporting/school-grades/](http://www.fldoe.org/accountability/accountability-reporting/school-grades/)
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(tidyverse)
+
+elementary <- read.csv("elementary.csv",colClasses = "character")
+middle <- read.csv("middle.csv",colClasses = "character")
+high <- read.csv("high.csv",colClasses = "character")
+charter <- read.csv("charter.csv",colClasses = "character")
+other <- read.csv("other.csv",colClasses = "character")
+
+v <- c(
+ "English.Language.Arts.Achievement", 
+ "English.Language.Arts.Learning.Gains", 
+ "English.Language.Arts.Learning.Gains.of.the.Lowest.25.",
+ "Mathematics.Achievement", 
+ "Mathematics.Learning.Gains", 
+ "Mathematics.Learning.Gains.of.the.Lowest.25.", 
+ "Science.Achievement", 
+ "Social.Studies.Achievement", 
+ "Middle.School.Acceleration", 
+ "Graduation.Rate.2016.17", 
+ "College.and.Career.Acceleration.2016.17", 
+ "Total.Points.Earned", 
+ "Total.Components", 
+ "Percent.of.Total.Possible.Points", 
+ "Percent.Tested", 
+ "Percent.of.Minority.Students", 
+ "Percent.of.Economically.Disadvantaged.Students"
+)
+for(j in colnames(elementary)[colnames(elementary) %in% v]) elementary[,j] <- as.numeric(elementary[,j])
+for(j in colnames(middle)[colnames(middle) %in% v]) middle[,j] <- as.numeric(middle[,j])
+for(j in colnames(high)[colnames(high) %in% v]) high[,j] <- as.numeric(high[,j])
+for(j in colnames(charter)[colnames(charter) %in% v]) charter[,j] <- as.numeric(charter[,j])
+for(j in colnames(other)[colnames(other) %in% v]) other[,j] <- as.numeric(other[,j])
+```
+
+Elementary
+=======================================================================
+
+Column {data-width=333}
+-----------------------------------------------------------------------
+
+### Chart A
+
+```{r}
+selectInput(
+  inputId = "district",
+  label = "District",
+  choices = sort(unique(elementary$District.Name)),
+  selected = "SEMINOLE"
+)
+district <- reactive({input$district})
+
+choices.school <- reactive({
+  sort(unique(
+    elementary$School.Name[elementary$District.Name == district()]
+  ))
+})
+
+
+selectInput(
+  inputId = "n.elementary",
+  label = "Number of Schools",
+  choices = c(5,10,25,100,nrow(elementary) - 2)
+)
+n.elementary <- reactive({input$n.elementary})
+
+renderUI({
+  choices <- choices.school()
+  selectInput(
+    inputId = "school",
+    label = "School",
+    choices = choices
+  )
+})
+school <- reactive({input$school})
+
+elementary.2 <- reactive({
+  elementary %>%
+    filter(District.Name == district(),School.Name == school())
+})
+
+close.elementary <- reactive({
+  c(t(elementary.2()[1,grepl(x = colnames(elementary.2()),pattern = "X")]))[1:n.elementary()]
+})
+```
+
+Column {data-width=667}
+-----------------------------------------------------------------------
+
+### Chart B
+
+```{r}
+renderPrint({print(district())})
+renderPrint({print(school())})
+renderPrint({print(close.elementary())})
+```
+
+
